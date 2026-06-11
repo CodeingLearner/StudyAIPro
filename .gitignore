@@ -1,0 +1,64 @@
+# Byte-compiled / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+.venv/
+ENV/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# IDEs and editors
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment variables
+.env
+.env.*.local
+
+# Local environment files
+.env
+
+# Database files
+*.db
+*.sqlite
+
+# Logs
+*.log
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Database
+*.sqlite3
+
+# Pytest
+.pytest_cache/
+
+# Packaging metadata
+pip-wheel-metadata/
+
+# mypy
+.mypy_cache/
+
+# Coverage
+.coverage
+htmlcov/
+coverage.xml
+
+# Cache
+.cache/
+
+# Python environment marker
+.Python

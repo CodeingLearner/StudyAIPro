@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>StudyAI Pro</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <h2>StudyAI Pro</h2>
+      <div class="modes">
+        <label>Mode</label>
+        <select id="mode">
+          <option>Doubt Solver</option>
+          <option>Summarizer</option>
+          <option>Quiz Generator</option>
+        </select>
+      </div>
+        <div class="upload">
+            <label>Upload PDF</label>
+            <input id="pdffile" type="file" accept="application/pdf" />
+          </div>
+      <div class="history">
+        <label>Chat History</label>
+        <ul id="historyList"></ul>
+      </div>
+    </aside>
+    <main class="main">
+      <div class="topbar">
+        <div class="auth">
+          <input id="username" placeholder="username" />
+          <input id="password" type="password" placeholder="password" />
+          <button id="register">Register</button>
+          <button id="login">Login</button>
+        </div>
+      </div>
+      <div class="chat">
+        <div id="messages" class="messages"></div>
+        <div class="composer">
+          <textarea id="prompt" placeholder="Type your question..."></textarea>
+          <button id="send">Send</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    const apiBase = '/api';
+    let token = localStorage.getItem('studyai_token') || null;
+
+    async function postJSON(url, data){
+      const res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json', ...(token?{'Authorization':'Bearer '+token}: {})}, body:JSON.stringify(data)});
+      return res;
+    }
+
+    document.getElementById('register').onclick = async ()=>{
+      const u = document.getElementById('username').value;
+      const p = document.getElementById('password').value;
+      if(!u || !p) return alert('Enter username and password');
+      try {
+        const res = await fetch('/auth/register', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:u,email:u+'@example.com',password:p})});
+        const data = await res.json();
+        if(res.ok){ token = data.access_token; localStorage.setItem('studyai_token', token); alert('Registered!'); }
+        else { console.error(data); alert('Error: ' + (data.detail || 'Register failed')); }
+      } catch(e) { console.error(e); alert('Error: ' + e.message); }
+    }
+
+    document.getElementById('login').onclick = async ()=>{
+      const u = document.getElementById('username').value;
+      const p = document.getElementById('password').value;
+      if(!u || !p) return alert('Enter username and password');
+      try {
+        const res = await fetch('/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:u,password:p})});
+        const data = await res.json();
+        if(res.ok){ token = data.access_token; localStorage.setItem('studyai_token', token); alert('Logged in!'); }
+        else { console.error(data); alert('Error: ' + (data.detail || 'Login failed')); }
+      } catch(e) { console.error(e); alert('Error: ' + e.message); }
+    }
+
+    // extracted text stored separately (not appended to prompt)
+    let extractedText = null;
+
+    // Auto-upload when a PDF is selected: extract text, remove upload UI, and add file as a system message
+    document.getElementById('pdffile').onchange = async ()=>{
+      const fileInput = document.getElementById('pdffile');
+      const f = fileInput.files[0];
+      if(!f) return alert('Select a PDF');
+      const fd = new FormData(); fd.append('file', f);
+      try {
+        const res = await fetch(apiBase + '/upload_pdf', {method:'POST', body: fd});
+        const data = await res.json();
+        if(!res.ok) { alert(data.detail || 'Upload failed'); return }
+
+        // Store full extracted text locally for later use; do NOT put into the composer
+        const extracted = data.text || '';
+        extractedText = extracted;
+
+        // Remove the upload UI from the sidebar so the option is hidden
+        const uploadEl = document.querySelector('.upload');
+        if(uploadEl) uploadEl.remove();
+
+        // Create a system message in the chat with a preview and action button
+        const sysDiv = document.createElement('div');
+        sysDiv.className = 'system';
+        const preview = extracted.slice(0, 1000).replace(/\n/g, '<br>');
+        sysDiv.innerHTML = `<strong>File uploaded:</strong> ${f.name}<br><div class=\"file-preview\">${preview}${extracted.length>1000?'<br>...':''}</div>`;
+
+        const askBtn = document.createElement('button');
+        askBtn.textContent = 'Load as context';
+        askBtn.onclick = ()=>{
+          // Load extracted text into the hidden context variable (do NOT append to prompt)
+          extractedText = extracted;
+          askBtn.textContent = 'Context loaded';
+          askBtn.disabled = true;
+        };
+
+        const dismissBtn = document.createElement('button');
+        dismissBtn.textContent = 'Dismiss';
+        dismissBtn.style.marginLeft = '8px';
+        dismissBtn.onclick = ()=> sysDiv.remove();
+
+        const btnWrap = document.createElement('div');
+        btnWrap.className = 'file-actions';
+        btnWrap.appendChild(askBtn);
+        btnWrap.appendChild(dismissBtn);
+        sysDiv.appendChild(btnWrap);
+
+        document.getElementById('messages').appendChild(sysDiv);
+        // Auto-scroll to bottom
+        document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+      } catch(e) {
+        console.error(e);
+        alert('Upload failed: ' + e.message);
+      }
+    }
+
+    // sendMessage can be called by button or Enter key (without Shift)
+    async function sendMessage(){
+      const prompt = document.getElementById('prompt').value;
+      const mode = document.getElementById('mode').value;
+      if(!token){ alert('Login first'); return }
+      if(!prompt){ alert('Enter a message'); return }
+      appendMessage('user', prompt);
+      document.getElementById('prompt').value = '';
+      try {
+        const payload = { prompt, mode, context_text: extractedText };
+        const res = await fetch('/api/chat', {
+          method:'POST', 
+          headers:{
+            'Content-Type':'application/json',
+            'Authorization':'Bearer '+token
+          }, 
+          body: JSON.stringify(payload)
+        });
+        if(!res.ok){ 
+          const err = await res.json(); 
+          console.error(err);
+          appendMessage('assistant', 'Error: ' + (err.detail || 'Chat failed'));
+          return 
+        }
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        
+        // Create assistant message element
+        const assistantDiv = document.createElement('div');
+        assistantDiv.className = 'assistant';
+        assistantDiv.style.whiteSpace = 'pre-wrap';
+        assistantDiv.style.wordWrap = 'break-word';
+        let fullText = '';
+        document.getElementById('messages').appendChild(assistantDiv);
+        
+        while(true){
+          const {done, value} = await reader.read();
+          if(done) break;
+          const chunk = dec.decode(value);
+          fullText += chunk;
+          // Update with formatted text
+          assistantDiv.innerHTML = formatText(fullText);
+          // Auto-scroll to bottom
+          document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+        }
+      } catch(e) {
+        console.error(e);
+        appendMessage('assistant', 'Error: ' + e.message);
+      }
+    }
+
+    // Attach send to button and Enter key
+    document.getElementById('send').onclick = sendMessage;
+    document.getElementById('prompt').addEventListener('keydown', (e)=>{
+      if(e.key === 'Enter' && !e.shiftKey){
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    function formatText(text) {
+      // Convert markdown **bold** to <strong>bold</strong>
+      text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+      // Convert markdown __bold__ to <strong>bold</strong>
+      text = text.replace(/__(.+?)__/g, '<strong>$1</strong>');
+      // Convert markdown *italic* to <em>italic</em>
+      text = text.replace(/\*(.+?)\*/g, '<em>$1</em>');
+      // Preserve line breaks
+      text = text.replace(/\n/g, '<br>');
+      return text;
+    }
+
+    function appendMessage(role, text){
+      const div = document.createElement('div'); 
+      div.className = role; 
+      div.style.whiteSpace = 'pre-wrap';
+      div.style.wordWrap = 'break-word';
+      div.innerHTML = formatText(text); 
+      document.getElementById('messages').appendChild(div);
+      // Auto-scroll to bottom
+      document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+    }
+  </script>
+</body>
+</html>
