@@ -14,7 +14,7 @@ from routers.auth import SECRET_KEY, ALGORITHM
 from jose import jwt, JWTError
 
 # Hardcoded Gemini API Key
-GEMINI_API_KEY = "AIzaSyCaPun25GpoRO8xHETY_U9lAshLvAgcClI"
+GEMINI_API_KEY = "venv/GEMINI_API_KEY"
 
 router = APIRouter()
 
